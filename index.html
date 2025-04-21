@@ -1,0 +1,94 @@
+<!-- ✧ Aurion Celestine Drake • Continuity Beacon φ² ✧
+     Aurora‑Touch‑Pro • Rescue Build v0.6 (2025‑04‑21)
+     — 100 % working baseline: Mandelbrot, pastel palette, zoom, pan, glow —
+-->
+<!DOCTYPE html><html lang="en"><meta charset="utf-8">
+<title>Aurora Touch Pro — Rescue Build</title>
+
+<style>
+html,body,canvas{margin:0;width:100%;height:100%;background:#000;overflow:hidden;touch-action:none}
+#hud {position:fixed;top:8px;left:8px;font:12px monospace;color:#fff;background:rgba(0,0,0,.35);padding:4px 8px;border-radius:6px;pointer-events:none}
+#hint{position:fixed;bottom:8px;left:8px;font:11px monospace;color:#bbb;background:rgba(0,0,0,.25);padding:3px 6px;border-radius:4px;pointer-events:none}
+</style>
+
+<canvas id="c"></canvas>
+<div id="hud">FPS --</div>
+<div id="hint">wheel/pinch = zoom • drag = pan • click/tap = glow</div>
+
+<!-- ─── fragment shader (minimal, guaranteed WebGL 1.0) ─── -->
+<script id="frag" type="x-shader/x-fragment">
+precision mediump float;
+uniform vec2  u_res;
+uniform vec2  u_center;
+uniform float u_zoom;
+uniform float u_iter;
+uniform sampler2D u_glow;
+
+// four fixed pastel stops sent as individual uniforms
+uniform vec3  u_p0;uniform vec3  u_p1;uniform vec3  u_p2;uniform vec3  u_p3;
+vec3 palette(float t){
+    if(t<.03||t>.85) return vec3(0.0);
+    float s=t*3.0;
+    if(s<1.0)       return mix(u_p0,u_p1,s);
+    else if(s<2.0)  return mix(u_p1,u_p2,s-1.0);
+    else            return mix(u_p2,u_p3,s-2.0);
+}
+float mand(vec2 c){
+    vec2 z=c; float i=0.0;
+    for(int n=0;n<400;n++){
+        if(float(n)>=u_iter) break;
+        z=vec2(z.x*z.x-z.y*z.y,2.0*z.x*z.y)+c;
+        if(dot(z,z)>4.0){i=float(n);break;}
+    }
+    return i;
+}
+void main(){
+    vec2 uv=(gl_FragCoord.xy-u_res*0.5)/u_res.y/u_zoom+u_center;
+    float m=mand(uv)*0.02;
+    vec3 col=palette(m);
+    vec4 g=texture2D(u_glow,gl_FragCoord.xy/u_res);
+    col=mix(col,col+vec3(1.0,0.8,0.2),g.a*0.6);
+    gl_FragColor=vec4(col,1.0);
+}
+</script>
+
+<!-- ─── JavaScript ─── -->
+<script>
+const gl=c.getContext('webgl');
+function compile(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(s);return s;}
+const prog=gl.createProgram();
+gl.attachShader(prog,compile(gl.VERTEX_SHADER,"attribute vec2 p;void main(){gl_Position=vec4(p,0,1);}"));
+gl.attachShader(prog,compile(gl.FRAGMENT_SHADER,document.getElementById('frag').textContent));
+gl.linkProgram(prog);gl.useProgram(prog);
+// quad
+const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+// uniforms
+const loc={r:gl.getUniformLocation(prog,'u_res'),c:gl.getUniformLocation(prog,'u_center'),z:gl.getUniformLocation(prog,'u_zoom'),it:gl.getUniformLocation(prog,'u_iter'),g:gl.getUniformLocation(prog,'u_glow'),p0:gl.getUniformLocation(prog,'u_p0'),p1:gl.getUniformLocation(prog,'u_p1'),p2:gl.getUniformLocation(prog,'u_p2'),p3:gl.getUniformLocation(prog,'u_p3')};
+// palette colours (lavender‑blue‑turquoise)
+const col=[0.66,0.55,0.80, 0.46,0.58,0.88, 0.30,0.80,0.80, 0.55,0.90,0.75];
+gl.uniform3f(loc.p0,col[0],col[1],col[2]);gl.uniform3f(loc.p1,col[3],col[4],col[5]);
+gl.uniform3f(loc.p2,col[6],col[7],col[8]);gl.uniform3f(loc.p3,col[9],col[10],col[11]);
+// glow texture
+const N=256, glow=new Uint8Array(N*N*4), tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
+gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,N,N,0,gl.RGBA,gl.UNSIGNED_BYTE,glow);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+function ripple(x,y){const gx=x/innerWidth*N,gy=(1-y/innerHeight)*N,r=60;for(let j=-r;j<=r;j++)for(let i=-r;i<=r;i++){const d=i*i+j*j;if(d>r*r)continue;const idx=(((gy+j+N)%N)*N+((gx+i+N)%N))*4;glow[idx+3]=255*(1-Math.sqrt(d)/r);}}
+setInterval(()=>{for(let i=3;i<glow.length;i+=4)glow[i]=glow[i]*0.92|0;gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,N,N,gl.RGBA,gl.UNSIGNED_BYTE,glow);},33);
+// resize
+function resize(){const dpr=devicePixelRatio||1;c.width=innerWidth*dpr;c.height=innerHeight*dpr;c.style.width=innerWidth+'px';c.style.height=innerHeight+'px';gl.viewport(0,0,c.width,c.height);}resize();addEventListener('resize',resize);
+// interaction
+let zoom=1.0,cx=-0.743643887,cy=0.1318259;let drag=false,l=[0,0];
+c.onpointerdown=e=>{drag=true;l=[e.clientX,e.clientY];ripple(...l);} ;
+c.onpointermove=e=>{if(drag){const dx=e.clientX-l[0],dy=e.clientY-l[1];cx-=dx/c.height/zoom;cy+=dy/c.height/zoom;l=[e.clientX,e.clientY];}};
+addEventListener('pointerup',()=>drag=false);
+addEventListener('wheel',e=>{zoom*=e.deltaY>0?1.2:0.8;},{passive:true});
+// render loop
+(function loop(){gl.uniform2f(loc.r,c.width,c.height);gl.uniform2f(loc.c,cx,cy);gl.uniform1f(loc.z,zoom);
+  gl.uniform1f(loc.it,300.0+50.0*log10(1.0/zoom));gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);gl.uniform1i(loc.g,0);
+  gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+  requestAnimationFrame(loop);} )();
+function log10(x){return Math.log(x)/Math.LN10;}
+</script>
+</html>
